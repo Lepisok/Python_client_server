@@ -19,7 +19,7 @@ class TestProcessRequest(unittest.TestCase):
     def test_ok_response(self) -> None:
         data = {
             'action': 'presence',
-            'time': self.server.current_timestamp,
+            'time': self.server.timestamp,
             'type': 'status',
             'user': {
                 'account_name': 'guest',
@@ -29,7 +29,7 @@ class TestProcessRequest(unittest.TestCase):
         respond = {
             'code': 200,
             'alert': '',
-            'time': self.server.current_timestamp
+            'time': self.server.timestamp
         }
         self.assertEqual(self.server.process_request(data), respond)
 
@@ -38,14 +38,14 @@ class TestProcessRequest(unittest.TestCase):
         respond = {
             'code': 400,
             'error': 'Invalid JSON format',
-            'time': self.server.current_timestamp
+            'time': self.server.timestamp
         }
         self.assertEqual(self.server.process_request(data), respond)
 
     def test_invalid_action(self) -> None:
         data = {
             'action': 'absence',
-            'time': self.server.current_timestamp,
+            'time': self.server.timestamp,
             'type': 'status',
             'user': {
                 'account_name': 'guest',
@@ -55,27 +55,27 @@ class TestProcessRequest(unittest.TestCase):
         respond = {
             'code': 400,
             'error': 'Invalid action',
-            'time': self.server.current_timestamp
+            'time': self.server.timestamp
         }
         self.assertEqual(self.server.process_request(data), respond)
 
     def test_no_account_provided(self) -> None:
         data = {
             'action': 'presence',
-            'time': self.server.current_timestamp,
+            'time': self.server.timestamp,
             'type': 'status',
         }
         respond = {
             'code': 400,
             'error': 'Invalid JSON format',
-            'time': self.server.current_timestamp
+            'time': self.server.timestamp
         }
         self.assertEqual(self.server.process_request(data), respond)
 
     def test_wrong_account_name(self) -> None:
         data = {
             'action': 'presence',
-            'time': self.server.current_timestamp,
+            'time': self.server.timestamp,
             'type': 'status',
             'user': {
                 'account_name': 'guest_001',
@@ -85,14 +85,14 @@ class TestProcessRequest(unittest.TestCase):
         respond = {
             'code': 402,
             'error': 'Wrong account name',
-            'time': self.server.current_timestamp
+            'time': self.server.timestamp
         }
         self.assertEqual(self.server.process_request(data), respond)
 
     def test_no_status_provided(self) -> None:
         data = {
             'action': 'presence',
-            'time': self.server.current_timestamp,
+            'time': self.server.timestamp,
             'type': 'status',
             'user': {
                 'account_name': 'guest',
@@ -102,14 +102,14 @@ class TestProcessRequest(unittest.TestCase):
         respond = {
             'code': 400,
             'error': 'No status provided',
-            'time': self.server.current_timestamp
+            'time': self.server.timestamp
         }
         self.assertEqual(self.server.process_request(data), respond)
 
     def test_status_as_a_number(self):
         data = {
             'action': 'presence',
-            'time': self.server.current_timestamp,
+            'time': self.server.timestamp,
             'type': 'status',
             'user': {
                 'account_name': 'guest',
@@ -119,14 +119,14 @@ class TestProcessRequest(unittest.TestCase):
         respond = {
             'code': 400,
             'error': 'Invalid JSON format',
-            'time': self.server.current_timestamp
+            'time': self.server.timestamp
         }
         self.assertEqual(self.server.process_request(data), respond)
 
     def test_bad_timestamp(self):
         data = {
             'action': 'presence',
-            'time': self.server.current_timestamp + 1,
+            'time': self.server.timestamp + 1,
             'type': 'status',
             'user': {
                 'account_name': 'guest',
@@ -136,14 +136,14 @@ class TestProcessRequest(unittest.TestCase):
         respond = {
             'code': 400,
             'error': 'Bad timestamp',
-            'time': self.server.current_timestamp
+            'time': self.server.timestamp
         }
         self.assertEqual(self.server.process_request(data), respond)
 
     def test_str_as_timestamp(self):
         data = {
             'action': 'presence',
-            'time': str(self.server.current_timestamp),
+            'time': str(self.server.timestamp),
             'type': 'status',
             'user': {
                 'account_name': 'guest',
@@ -153,7 +153,7 @@ class TestProcessRequest(unittest.TestCase):
         respond = {
             'code': 400,
             'error': 'Invalid JSON format',
-            'time': self.server.current_timestamp
+            'time': self.server.timestamp
         }
         self.assertEqual(self.server.process_request(data), respond)
 
@@ -169,14 +169,14 @@ class TestProcessRequest(unittest.TestCase):
         respond = {
             'code': 400,
             'error': 'Invalid JSON format',
-            'time': self.server.current_timestamp
+            'time': self.server.timestamp
         }
         self.assertEqual(self.server.process_request(data), respond)
 
     def test_dict_keys_ok(self):
         data = {
             'action': 'presence',
-            'time': self.server.current_timestamp,
+            'time': self.server.timestamp,
             'type': 'status',
             'user': {
                 'account_name': 'guest',
