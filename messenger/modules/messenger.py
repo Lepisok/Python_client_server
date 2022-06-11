@@ -82,10 +82,13 @@ class JimClient(Jim):
         self.address = address
         self.port = port
         self.client_sock = socket(AF_INET, SOCK_STREAM)
+        self.account_name = ''
+        self.active_session = False
 
     def connect(self):
         try:
             self.client_sock.connect((self.address, self.port))
+            self.active_session = True
             self._logger.debug(f'Connected to server {self.address}:{self.port}')
         except ConnectionRefusedError:
             self._logger.critical(f'Server {self.address}:{self.port}'
@@ -98,18 +101,26 @@ class JimClient(Jim):
             if answer is None:
                 raise ConnectionAbortedError
         except (ConnectionError, ConnectionResetError, ConnectionAbortedError):
-            print('Connection to server is lost')
-            sys.exit(1)
+            if not self.active_session:
+                print('Connection to server is lost')
+                sys.exit(1)
         except OSError:
             pass
         else:
             return self.process_response(answer)
 
+    @log
     def disconnect(self):
+        message = {
+            ACTION: CLOSE_SESSION,
+            TIME: self.timestamp,
+            USER_NAME: self.account_name,
+        }
+        self.send(self.client_sock, message)
         self.client_sock.close()
 
     @log
-    def send_presence(self, account_name: str, status: str) -> None:
+    def send_presence(self, account_name: str, status: str):
         message = {
             ACTION: SEND_PRESENCE,
             TIME: self.timestamp,
@@ -120,13 +131,24 @@ class JimClient(Jim):
             },
         }
         self.send(self.client_sock, message)
+        self.account_name = account_name
         return self.listen()
 
-    def send_to_all(self, account_name: str, text: str):
+    def send_message(self, recipient: str, text: str):
+        message = {
+            ACTION: SEND_MESSAGE,
+            TIME: self.timestamp,
+            USER_NAME: self.account_name,
+            DESTINATION: recipient,
+            MESSAGE: text,
+        }
+        self.send(self.client_sock, message)
+
+    def send_to_all(self, text: str):
         message = {
             ACTION: SEND_TO_ALL,
             TIME: self.timestamp,
-            USER_NAME: account_name,
+            USER_NAME: self.account_name,
             MESSAGE: text,
         }
         self.send(self.client_sock, message)
@@ -137,7 +159,9 @@ class JimClient(Jim):
             OK200: self.ok_handler,
             ERR400: self.error_handler,
             ERR402: self.error_handler,
-            SEND_TO_ALL: self.to_all_handler,
+            ERR404: self.user_not_found,
+            SEND_TO_ALL: self.message_handler,
+            SEND_MESSAGE: self.message_handler,
         }
         try:
             return handlers[data[CODE]](data)
@@ -147,10 +171,15 @@ class JimClient(Jim):
             except (KeyError, ValueError):
                 self._logger.critical(INVALID_JSON)
                 self.client_sock.close()
+                self.active_session = False
                 sys.exit(1)
 
+    def user_not_found(self, data):
+        print('\nUser not found')
+        return self.error_handler(data)
+
     @log
-    def ok_handler(self, data: dict) -> None:
+    def ok_handler(self, data: dict):
         try:
             code = data['code']
             alert = 'no additional message provided' \
@@ -160,10 +189,11 @@ class JimClient(Jim):
         except (KeyError, ValueError):
             self._logger.critical(INVALID_JSON)
             self.client_sock.close()
+            self.active_session = False
             sys.exit(1)
 
     @log
-    def error_handler(self, data: dict) -> None:
+    def error_handler(self, data: dict):
         try:
             code = data['code']
             error = data['error']
@@ -172,15 +202,17 @@ class JimClient(Jim):
         except (KeyError, ValueError):
             self._logger.critical(INVALID_JSON)
             self.client_sock.close()
+            self.active_session = False
             sys.exit(1)
 
     @log
-    def to_all_handler(self, data: dict):
+    def message_handler(self, data: dict):
         try:
-            print(f'{data[USER_NAME]}: {data[MESSAGE]}')
+            print(f'\n{data[USER_NAME]}: {data[MESSAGE]}')
         except KeyError:
             self._logger.critical(INVALID_JSON)
             self.client_sock.close()
+            self.active_session = False
             sys.exit(1)
 
 
@@ -192,6 +224,7 @@ class JimServer(Jim):
     def __init__(self, address: str, port: int, logger=EmptyLogger()) -> None:
         super().__init__(logger)
         self.clients = []
+        self.users = {}
         self.server_sock = socket(AF_INET, SOCK_STREAM)
         self.server_sock.bind((address, port))
         self.server_sock.listen(self.REQUEST_QUEUE)
@@ -230,6 +263,13 @@ class JimServer(Jim):
             requests = self.receive_data(clients_read, self.clients)
             responses = self.process_requests(requests, clients_write)
             self.send_data(responses, self.clients)
+            users_to_remove = []
+            for user, client in self.users.items():
+                if client not in self.clients:
+                    users_to_remove.append(user)
+            for user in users_to_remove:
+                self._logger.info(USER_LOGGED_OUT % user)
+                self.users.pop(user)
 
     def process_requests(self, requests, clients_write):
         responses = {}
@@ -242,9 +282,11 @@ class JimServer(Jim):
         handlers = {
             SEND_PRESENCE: self.presence,
             SEND_TO_ALL: self.to_all,
+            SEND_MESSAGE: self.message,
+            CLOSE_SESSION: self.close_session,
         }
         try:
-            action = data['action']
+            action = data[ACTION]
         except KeyError:
             return self.error_response(client, ERR400, INVALID_JSON)
         try:
@@ -257,7 +299,7 @@ class JimServer(Jim):
         if client in clients_write:
             try:
                 account_name = data[USER][USER_NAME]
-                if account_name != 'guest':
+                if account_name not in USER_LIST:
                     return self.error_response(client, ERR402, WRONG_USER)
                 status = data[USER][STATUS]
                 if len(status) == 0:
@@ -265,6 +307,8 @@ class JimServer(Jim):
                 timestamp = data[TIME]
                 if timestamp > self.timestamp:
                     return self.error_response(client, ERR400, BAD_TIMESTAMP)
+                self.users.update({account_name: client})
+                self._logger.info(USER_LOGGED_IN % account_name)
                 return self.ok_response(client, OK200)
             except (KeyError, TypeError):
                 return self.error_response(client, ERR400, INVALID_JSON)
@@ -275,6 +319,26 @@ class JimServer(Jim):
             if current_client != client:
                 response[current_client] = data
         return response
+
+    def message(self, client, data, *args):
+        try:
+            account_name = data[USER_NAME]
+            if account_name not in self.users:
+                return self.error_response(client, ERR402, WRONG_USER)
+            timestamp = data[TIME]
+            if timestamp > self.timestamp:
+                return self.error_response(client, ERR400, BAD_TIMESTAMP)
+            recipient = data[DESTINATION]
+            if recipient in self.users:
+                return {self.users[recipient]: data}
+            return self.error_response(client, ERR404, USER_OFFLINE)
+        except (KeyError, TypeError):
+            return self.error_response(client, ERR400, INVALID_JSON)
+
+    def close_session(self, client, *args):
+        self.clients.remove(client)
+        client.close()
+        return {}
 
     @log
     def error_response(self, client, code: int, message: str) -> dict:
